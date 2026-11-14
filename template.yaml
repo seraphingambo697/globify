@@ -186,6 +186,18 @@ Resources:
             Auth:
               Authorizer: NONE
 
+  MeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/me.handler
+      Events:
+        Me:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /me
+            Method: get
+
 # Les sorties
 Outputs:
   ApiUrl:
