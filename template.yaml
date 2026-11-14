@@ -1,0 +1,53 @@
+#l’en-tête
+AWSTemplateFormatVersion: '2010-09-09' #CloudFormation
+Transform: AWS::Serverless-2016-10-31 #Serverless
+Description: Blogify - plateforme de blogs headless serverless - Template CloudFormation
+
+# Les paramètres
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues: [ dev, prod ]
+
+# Les globales 
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    CodeUri: src/
+    MemorySize: 256
+    Timeout: 10
+    Architectures: [ arm64 ]
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+
+# Les ressources
+Resources:
+  BlogApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      Cors:
+        AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+
+  # La fonction de santé
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/health.handler
+      Events:
+        Health:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /health
+            Method: get
+
+# Les sorties
+Outputs:
+  ApiUrl:
+    Description: URL de base de l'API
+    Value: !Sub https://${BlogApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
