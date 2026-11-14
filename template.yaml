@@ -124,3 +124,7 @@ Outputs:
   TableName:
     Description: Nom de la table DynamoDB
     Value: !Ref BlogTable
+
+  MediaBucketName:
+    Description: Nom du bucket S3 des médias
+    Value: !Ref MediaBucket
