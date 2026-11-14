@@ -199,3 +199,11 @@ Outputs:
   MediaBucketName:
     Description: Nom du bucket S3 des médias
     Value: !Ref MediaBucket
+
+  UserPoolId:
+    Description: Identifiant du User Pool Cognito
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Description: Identifiant du client Cognito
+    Value: !Ref UserPoolClient
