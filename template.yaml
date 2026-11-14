@@ -22,6 +22,7 @@ Globals:
       Variables:
         STAGE: !Ref Stage
         TABLE_NAME: !Ref BlogTable
+        MEDIA_BUCKET: !Ref MediaBucket
 
 # Les ressources
 Resources:
