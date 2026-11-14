@@ -92,6 +92,58 @@ Resources:
           AllowedHeaders: [ '*' ]
           MaxAge: 3000
 
+  # cognito pool
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub blogify-${Stage}-users
+      UsernameAttributes:
+      - email
+      AutoVerifiedAttributes:
+      - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub blogify-${Stage}-client
+      GenerateSecret: false
+      ExplicitAuthFlows:
+      - ALLOW_USER_PASSWORD_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref UserPool
+      GroupName: admin
+      Description: Administrateurs - tous les droits
+      Precedence: 1
+
+  EditorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref UserPool
+      GroupName: editor
+      Description: Editeurs - gerent et publient les articles
+      Precedence: 2
+
+  GuestAuthorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref UserPool
+      GroupName: guest_author
+      Description: Auteurs invites - gerent leurs propres brouillons
+      Precedence: 3
+
   # L’API de blog
   BlogApi:
     Type: AWS::Serverless::Api
