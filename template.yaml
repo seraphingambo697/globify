@@ -71,6 +71,27 @@ Resources:
         StreamViewType: NEW_AND_OLD_IMAGES
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+
+  # Le bucket S3 de médias
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+        - AllowedMethods: [ GET, PUT ]
+          AllowedOrigins: [ '*' ]
+          AllowedHeaders: [ '*' ]
+          MaxAge: 3000
+
   # L’API de blog
   BlogApi:
     Type: AWS::Serverless::Api
