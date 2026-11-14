@@ -21,9 +21,56 @@ Globals:
     Environment:
       Variables:
         STAGE: !Ref Stage
+        TABLE_NAME: !Ref BlogTable
 
 # Les ressources
 Resources:
+
+  BlogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub blogify-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: PK
+        AttributeType: S
+      - AttributeName: SK
+        AttributeType: S
+      - AttributeName: GSI1PK
+        AttributeType: S
+      - AttributeName: GSI1SK
+        AttributeType: S
+      - AttributeName: GSI2PK
+        AttributeType: S
+      - AttributeName: GSI2SK
+        AttributeType: S
+      KeySchema:
+      - AttributeName: PK
+        KeyType: HASH
+      - AttributeName: SK
+        KeyType: RANGE
+      GlobalSecondaryIndexes:
+      - IndexName: GSI1
+        KeySchema:
+        - AttributeName: GSI1PK
+          KeyType: HASH
+        - AttributeName: GSI1SK
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      - IndexName: GSI2
+        KeySchema:
+        - AttributeName: GSI2PK
+          KeyType: HASH
+        - AttributeName: GSI2SK
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+  # L’API de blog
   BlogApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -51,3 +98,7 @@ Outputs:
   ApiUrl:
     Description: URL de base de l'API
     Value: !Sub https://${BlogApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
+
+  TableName:
+    Description: Nom de la table DynamoDB
+    Value: !Ref BlogTable
