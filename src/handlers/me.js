@@ -1,11 +1,6 @@
 const { ok } = require('../lib/response');
+const { wrap } = require('../lib/http');
+const { getUser } = require('../lib/auth');
 
-exports.handler = async (event) => {
-    const claims = event.requestContext.authorizer.claims;
-
-    return ok({
-        userId: claims.sub,
-        email: claims.email,
-        groups: claims['cognito:groups'] || null,
-    });
-};
+// GET /me (protégé) : renvoie l'utilisateur connecté et ses rôles
+exports.handler = wrap(async (event) => ok(getUser(event)));
