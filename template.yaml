@@ -1,16 +1,14 @@
-#l’en-tête
-AWSTemplateFormatVersion: '2010-09-09' #CloudFormation
-Transform: AWS::Serverless-2016-10-31 #Serverless
-Description: Blogify - plateforme de blogs headless serverless - Template CloudFormation
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Blogify - plateforme de blogs headless serverless
 
-# Les paramètres
 Parameters:
   Stage:
     Type: String
     Default: dev
     AllowedValues: [ dev, prod ]
 
-# Les globales 
+# Réglages communs à toutes les Lambdas
 Globals:
   Function:
     Runtime: nodejs22.x
@@ -18,15 +16,18 @@ Globals:
     MemorySize: 256
     Timeout: 10
     Architectures: [ arm64 ]
+    Tracing: Active
     Environment:
       Variables:
         STAGE: !Ref Stage
         TABLE_NAME: !Ref BlogTable
         MEDIA_BUCKET: !Ref MediaBucket
+        USER_POOL_ID: !Ref UserPool
+        USER_POOL_CLIENT_ID: !Ref UserPoolClient
+        TOPIC_ARN: !Ref NewPostTopic
 
-# Les ressources
 Resources:
-
+  # Base de données (single-table design)
   BlogTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -72,7 +73,7 @@ Resources:
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
-  # Le bucket S3 de médias
+  # Stockage des médias
   MediaBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -92,8 +93,7 @@ Resources:
           AllowedHeaders: [ '*' ]
           MaxAge: 3000
 
-  # cognito pool
-
+  # Authentification
   UserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -144,11 +144,24 @@ Resources:
       Description: Auteurs invites - gerent leurs propres brouillons
       Precedence: 3
 
-  # L’API de blog
+  # Notifications
+  NewPostTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub blogify-${Stage}-new-posts
+      DisplayName: Blogify
+
+  # API Gateway
   BlogApi:
     Type: AWS::Serverless::Api
     Properties:
       StageName: !Ref Stage
+      TracingEnabled: true
+      MethodSettings:
+      - ResourcePath: '/*'
+        HttpMethod: '*'
+        ThrottlingRateLimit: 50
+        ThrottlingBurstLimit: 100
       Cors:
         AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,Authorization'"
@@ -171,7 +184,7 @@ Resources:
               Access-Control-Allow-Origin: "'*'"
               Access-Control-Allow-Headers: "'Content-Type,Authorization'"
 
-  # La fonction de santé
+  # Lambdas - Système
   HealthFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -198,7 +211,365 @@ Resources:
             Path: /me
             Method: get
 
-# Les sorties
+  # Lambdas - Authentification (routes publiques)
+  SignupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/auth/signup.handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - cognito-idp:AdminAddUserToGroup
+          Resource: !GetAtt UserPool.Arn
+      Events:
+        Signup:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /auth/signup
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  ConfirmFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/auth/confirm.handler
+      Events:
+        Confirm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /auth/confirm
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  LoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/auth/login.handler
+      Events:
+        Login:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /auth/login
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  RefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/auth/refresh.handler
+      Events:
+        Refresh:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /auth/refresh
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  # Lambdas - Utilisateurs (admin)
+  ListUsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/users/list.handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - cognito-idp:ListUsers
+          Resource: !GetAtt UserPool.Arn
+      Events:
+        ListUsers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /users
+            Method: get
+
+  SetUserRoleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/users/setRole.handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - cognito-idp:ListUsers
+          - cognito-idp:AdminListGroupsForUser
+          - cognito-idp:AdminAddUserToGroup
+          - cognito-idp:AdminRemoveUserFromGroup
+          Resource: !GetAtt UserPool.Arn
+      Events:
+        SetRole:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /users/{id}/role
+            Method: put
+
+  # Lambdas - Articles
+  CreatePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/posts/create.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        CreatePost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts
+            Method: post
+
+  ListPostsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/posts/list.handler
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        ListPosts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts
+            Method: get
+            Auth:
+              Authorizer: NONE
+
+  GetPostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/posts/get.handler
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        GetPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts/{id}
+            Method: get
+            Auth:
+              Authorizer: NONE
+
+  ManagePostsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/posts/manage.handler
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        ManagePosts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /manage/posts
+            Method: get
+
+  UpdatePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/posts/update.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        UpdatePost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts/{id}
+            Method: put
+
+  DeletePostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/posts/delete.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        DeletePost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts/{id}
+            Method: delete
+
+  # Lambdas - Commentaires et modération
+  CreateCommentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/comments/create.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        CreateComment:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts/{id}/comments
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  ListCommentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/comments/list.handler
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        ListComments:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts/{id}/comments
+            Method: get
+            Auth:
+              Authorizer: NONE
+
+  PendingCommentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/comments/pending.handler
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        PendingComments:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /comments/pending
+            Method: get
+
+  ModerateCommentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/comments/moderate.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        ModerateComment:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /posts/{id}/comments/{commentId}
+            Method: patch
+
+  # Lambdas - Médias
+  UploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/media/uploadUrl.handler
+      Policies:
+      - S3WritePolicy:
+          BucketName: !Ref MediaBucket
+      Events:
+        UploadUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /media/upload-url
+            Method: post
+
+  GetMediaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/media/get.handler
+      Policies:
+      - S3ReadPolicy:
+          BucketName: !Ref MediaBucket
+      Events:
+        GetMedia:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /media/{key+}
+            Method: get
+            Auth:
+              Authorizer: NONE
+
+  # Lambdas - Recherche
+  SearchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/search/search.handler
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName: !Ref BlogTable
+      Events:
+        Search:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /search
+            Method: get
+            Auth:
+              Authorizer: NONE
+
+  # Lambdas - Abonnés et notifications
+  SubscribeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/subscribers/subscribe.handler
+      Policies:
+      - Statement:
+        - Effect: Allow
+          Action:
+          - sns:Subscribe
+          Resource: !Ref NewPostTopic
+      Events:
+        Subscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BlogApi
+            Path: /subscribe
+            Method: post
+            Auth:
+              Authorizer: NONE
+
+  NotifySubscribersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers/notifications/notify.handler
+      Environment:
+        Variables:
+          API_URL: !Sub https://${BlogApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}
+      Policies:
+      - SNSPublishMessagePolicy:
+          TopicName: !GetAtt NewPostTopic.TopicName
+      Events:
+        PostPublished:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt BlogTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+            MaximumRetryAttempts: 3
+            FunctionResponseTypes:
+            - ReportBatchItemFailures
+            FilterCriteria:
+              Filters:
+              - Pattern: '{"dynamodb": {"NewImage": {"type": {"S": ["POST"]}, "status": {"S": ["published"]}}}}'
+
 Outputs:
   ApiUrl:
     Description: URL de base de l'API
@@ -219,3 +590,7 @@ Outputs:
   UserPoolClientId:
     Description: Identifiant du client Cognito
     Value: !Ref UserPoolClient
+
+  NewPostTopicArn:
+    Description: Topic SNS des notifications
+    Value: !Ref NewPostTopic
